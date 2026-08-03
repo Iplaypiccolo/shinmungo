@@ -265,7 +265,6 @@ p.page-desc{
 }
 table{
   border-collapse:collapse;
-  width:100%;
   font-size:12.5px;
 }
 thead th{
@@ -274,19 +273,51 @@ thead th{
   color:#fff;
   font-weight:600;
   font-size:11.5px;
-  padding:9px 10px;
+  padding:8px 9px;
   text-align:left;
   white-space:nowrap;
   border-right:1px solid rgba(255,255,255,.08);
 }
 tbody td{
-  padding:7px 10px;
+  padding:6px 9px;
   border-bottom:1px solid var(--line);
   border-right:1px solid #eeece6;
   vertical-align:top;
-  min-width:90px;
+  /* 기본값: 굳이 다 안 보여도 되는 칸 — 2줄까지만 보여주고 나머지는 접는다 */
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+  max-height:2.8em;
+  line-height:1.4em;
 }
-tbody td.content-cell{min-width:260px; max-width:420px;}
+tbody td:focus{
+  display:block;
+  -webkit-line-clamp:unset;
+  max-height:none;
+  overflow:visible;
+  position:relative;
+  z-index:5;
+}
+/* 반드시 한 줄에 다 들어가야 하는 핵심 칸: 줄바꿈 없이 필요한 만큼 옆으로 넓어진다 */
+tbody td.col-본부명, tbody td.col-지사명, tbody td.col-신고구분, tbody td.col-제목추출, tbody td.col-내용{
+  display:table-cell;
+  white-space:nowrap;
+  max-height:none;
+  overflow:visible;
+}
+/* 값이 짧은 칸은 폭을 줄여서 핵심 칸에 자리를 더 준다 */
+th.col-연도, td.col-연도, th.col-월, td.col-월, th.col-일, td.col-일, th.col-건수, td.col-건수{ width:44px; }
+th.col-발생시각, td.col-발생시각, th.col-처리기관수, td.col-처리기관수{ width:64px; }
+th.col-차량번호, td.col-차량번호{ width:92px; }
+th.col-전화번호, td.col-전화번호{ width:100px; }
+th.col-답변일, td.col-답변일{ width:80px; }
+th.col-진행상황, td.col-진행상황, th.col-답변처리상황, td.col-답변처리상황{ width:60px; }
+th.col-유입경로, td.col-유입경로{ width:60px; }
+th.col-신고번호, td.col-신고번호{ width:130px; }
+th.col-신고발생지역, td.col-신고발생지역{ width:160px; }
+th.col-유형, td.col-유형{ width:140px; }
+th.col-답변내용, td.col-답변내용{ width:200px; }
 tbody tr:nth-child(even){background:#fbfaf7;}
 tbody tr.flag-branch td, tbody tr.flag-keyword td{background:var(--bad-bg);}
 tbody tr.flag-branch td.col-지사명, tbody tr.flag-branch td.col-본부명,
@@ -349,8 +380,11 @@ td[contenteditable="true"]:focus{
   display:grid;
   grid-template-columns:1fr 1fr 1fr auto;
   gap:8px;
-  align-items:center;
+  align-items:start;
 }
+.field-group{ display:flex; flex-direction:column; gap:6px; }
+.field-actions{ display:flex; flex-direction:column; gap:6px; }
+.field-actions .btn{ white-space:nowrap; }
 .quickform input, .quickform select{
   font-family:var(--sans);
   font-size:12.5px;
@@ -623,21 +657,44 @@ function extractTime(text){
   return m ? m[1].trim() : '';
 }
 
+function stripLocationPhrases(text){
+  if(!text) return text;
+  let t = text;
+  // '노선명 + 방향 + 거리(km/지점) + (휴게소/나들목 등)' 묶음을 통째로 제거
+  t = t.replace(/[^\s]{1,14}(?:선|고속도로|국도|지선)\s*[가-힣]{1,6}방향\s*[\d]*\.?[\d]*\s*(?:km|k)?\s*(?:지점|휴게소내|휴게소|나들목|분기점|IC|JC)?/gi, ' ');
+  // 노선명 없이 남은 'OOO방향 12.3k' 류 제거
+  t = t.replace(/[가-힣]{1,6}방향\s*[\d]*\.?[\d]*\s*(?:km|k)?\s*(?:지점)?/gi, ' ');
+  // 단독으로 남은 'OOkm', '12지점' 표기 제거
+  t = t.replace(/\d+(?:\.\d+)?\s*(?:km|k|지점)\b/gi, ' ');
+  // 'OOO휴게소(내)' 단독 표기 제거
+  t = t.replace(/[가-힣]{1,10}휴게소내?\b/g, ' ');
+  return t.replace(/\s+/g,' ').trim();
+}
+
 function extractCoreContent(text){
   const {head} = splitHeadTail(text);
+  let out = '';
   let m = head.match(/위반\s*규정\s*(?:및\s*위반\s*사항)?\s*[:：]\s*([^\n\r]+)/);
-  if(m) return m[1].trim();
+  if(m) out = m[1].trim();
   // '내용:' 라벨이 있으면 그 값만 쓴다. 바로 다음 줄에 오는 '위치:' 같은 위치 정보는
   // 신고발생지역 칸에 이미 있으므로 여기서는 버린다(중복 방지).
-  m = head.match(/(?:^|\n)\s*내용\s*[:：]\s*([^\n\r]+)/);
-  if(m) return m[1].trim();
-  let lines = head.split(/\n/).map(l=>l.trim()).filter(l=>l.length>0);
-  // 신고기관 / 신고위치 / 위치 / 발생일자 / 발생시각 / 위반장소 라벨이 붙은 줄은
-  // 다른 칸(지사명, 신고발생지역, 발생시각, 연/월/일)과 내용이 겹치므로 제외한다.
-  lines = lines.filter(l => !/^\*?\s*(신고기관|신고위치[^\n]*|위치|발생일자|발생시각|위반장소)\s*[:：]/.test(l));
-  let out = lines.join(' ').trim();
+  if(!out){
+    m = head.match(/(?:^|\n)\s*내용\s*[:：]\s*([^\n\r]+)/);
+    if(m) out = m[1].trim();
+  }
+  if(!out){
+    let lines = head.split(/\n/).map(l=>l.trim()).filter(l=>l.length>0);
+    // 신고기관 / 신고위치 / 위치 / 발생일자 / 발생시각 / 위반장소 라벨이 붙은 줄은
+    // 다른 칸(지사명, 신고발생지역, 발생시각, 연/월/일)과 내용이 겹치므로 제외한다.
+    lines = lines.filter(l => !/^\*?\s*(신고기관|신고위치[^\n]*|위치|발생일자|발생시각|위반장소)\s*[:：]/.test(l));
+    out = lines.join(' ').trim();
+  }
   if(!out) out = cleanStr(text).slice(0,120);
-  return out;
+  // 노선/방향/거리표지 같은 위치 정보는 신고발생지역 칸에서 볼 수 있으므로 내용에서는 뺀다.
+  // 다만 이걸 지웠을 때 내용이 통째로 빈 문자열이 되면(내용 전체가 위치 설명뿐이었던 경우)
+  // 정보 손실을 막기 위해 원래 값을 그대로 둔다.
+  const stripped = stripLocationPhrases(out);
+  return stripped || out;
 }
 
 function normalizeKey(s){
@@ -929,7 +986,7 @@ function renderResultTable(){
   document.getElementById('resultNext').onclick = ()=>{ state.resultPage++; renderResultTable(); };
 
   let html = '<table><thead><tr>';
-  OUTPUT_COLUMNS.forEach(c=> html += `<th>${c}</th>`);
+  OUTPUT_COLUMNS.forEach(c=> html += `<th class="col-${c}">${c}</th>`);
   html += '</tr></thead><tbody>';
   pageIdxs.forEach(idx=>{
     const row = state.result[idx];
@@ -939,7 +996,7 @@ function renderResultTable(){
     OUTPUT_COLUMNS.forEach(col=>{
       const val = row[col] === undefined ? '' : row[col];
       const isMono = ['신고번호','연도','월','일','발생시각','건수','차량번호'].includes(col);
-      const cls = (col==='내용' ? 'content-cell ' : '') + `col-${col}` + (isMono?' mono':'');
+      const cls = `col-${col}` + (isMono?' mono':'');
       html += `<td class="${cls}" contenteditable="true" data-field="${col}">${escapeHtml(String(val))}</td>`;
     });
     html += '</tr>';
@@ -980,6 +1037,19 @@ function renderReviewLists(){
 
 const REVIEW_PAGE_SIZE = 30;
 state.reviewPage = 0;
+
+function uniqueTitles(){
+  return [...new Set(state.keywordMap.map(k=>k.title).filter(Boolean))].sort();
+}
+function uniqueCategories(){
+  return [...new Set(state.keywordMap.map(k=>k.category).filter(Boolean))].sort();
+}
+function buildOptionSelect(cls, options, placeholder){
+  let html = `<select class="${cls}"><option value="">${placeholder}</option>`;
+  options.forEach(o=> html += `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`);
+  html += `<option value="__custom__">➕ 새 값 직접 입력</option></select>`;
+  return html;
+}
 
 function renderKeywordReview(){
   const el = document.getElementById('keywordReviewList');
@@ -1029,14 +1099,38 @@ function renderKeywordReview(){
       ${suggestHtml}
       <div class="quickform">
         <input type="text" placeholder="등록할 단어 (내용에 포함된 단어)" class="kw-word" value="${r._typo ? escapeHtml(r._typo.token) : ''}">
-        <input type="text" placeholder="제목추출 (예: 24 후미등 불량)" class="kw-title">
-        <input type="text" placeholder="신고구분 (예: 2 안전기준 위반)" class="kw-category">
-        <button class="btn small" data-action="register-keyword">이 표현으로 등록</button>
+        <div class="field-group">
+          ${buildOptionSelect('kw-title-select', uniqueTitles(), '제목추출 선택…')}
+          <input type="text" class="kw-title-custom" placeholder="새 제목추출 값 입력" style="display:none;">
+        </div>
+        <div class="field-group">
+          ${buildOptionSelect('kw-category-select', uniqueCategories(), '신고구분 선택…')}
+          <input type="text" class="kw-category-custom" placeholder="새 신고구분 값 입력" style="display:none;">
+        </div>
+        <div class="field-actions">
+          <button class="btn small ghost" data-action="mark-unreadable">신고내용 확인불가</button>
+          <button class="btn small" data-action="register-keyword">이 표현으로 등록</button>
+        </div>
       </div>
     `;
     el.appendChild(card);
   });
 }
+
+// 드롭다운에서 '➕ 새 값 직접 입력'을 고르면 옆의 커스텀 입력창을 보여준다
+document.getElementById('keywordReviewList').addEventListener('change', e=>{
+  const sel = e.target;
+  if(sel.classList.contains('kw-title-select')){
+    const custom = sel.closest('.field-group').querySelector('.kw-title-custom');
+    custom.style.display = sel.value === '__custom__' ? 'block' : 'none';
+    if(sel.value === '__custom__') custom.focus();
+  }
+  if(sel.classList.contains('kw-category-select')){
+    const custom = sel.closest('.field-group').querySelector('.kw-category-custom');
+    custom.style.display = sel.value === '__custom__' ? 'block' : 'none';
+    if(sel.value === '__custom__') custom.focus();
+  }
+});
 
 // 카드 안 버튼은 el 하나에만 걸어둔 위임 리스너로 처리 (카드 수가 많아져도 안전)
 document.getElementById('keywordReviewList').addEventListener('click', e=>{
@@ -1063,10 +1157,25 @@ document.getElementById('keywordReviewList').addEventListener('click', e=>{
     toast('오타를 수정하고 다시 매칭했습니다');
   }
 
+  if(btn.dataset.action === 'mark-unreadable'){
+    // 키워드 매핑표에는 추가하지 않는다 — 이 신고 건 하나만 '확인불가'로 확정하는 것이므로
+    // 다른 건에까지 영향을 주면 안 된다.
+    row.신고구분 = '신고내용 확인불가';
+    row.제목추출 = '신고내용 확인불가';
+    row._keywordMatched = true;
+    row._typo = null;
+    renderResultTable();
+    renderKeywordReview();
+    renderStats(0);
+    toast('신고내용 확인불가로 표시했습니다');
+  }
+
   if(btn.dataset.action === 'register-keyword'){
     const word = card.querySelector('.kw-word').value.trim();
-    const title = card.querySelector('.kw-title').value.trim();
-    const category = card.querySelector('.kw-category').value.trim();
+    const titleSel = card.querySelector('.kw-title-select').value;
+    const categorySel = card.querySelector('.kw-category-select').value;
+    const title = titleSel === '__custom__' ? card.querySelector('.kw-title-custom').value.trim() : titleSel;
+    const category = categorySel === '__custom__' ? card.querySelector('.kw-category-custom').value.trim() : categorySel;
     if(!word || !title || !category){
       toast('단어 / 제목추출 / 신고구분을 모두 입력해주세요');
       return;
